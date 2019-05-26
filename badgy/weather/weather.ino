@@ -12,8 +12,6 @@
 #include <Fonts/FreeMonoBold12pt7b.h>
 #include <Fonts/FreeMonoBold18pt7b.h>
 
-#include "icons.h"
-
 /* WiFi libs*/
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
@@ -26,6 +24,9 @@
 
 // Often found in Arduino\hardware\tools\avr\lib\gcc\avr\4.9.2\install-tools\limits.h
 #include <Limits.h>
+
+// Local icons used for this project.
+#include "icons.h"
 
 const char* WEATHER_HOST = "api.openweathermap.org";
 const char* API_KEY = "854f7522429fb2760c19380767bd786d"; //Your API key https://home.openweathermap.org/
@@ -492,7 +493,7 @@ bool getForecastData()
   if (!SHOW_WIND_INSTEAD_OF_DAY_RANGE) { 
     display.setTextColor(GxEPD_BLACK);
     display.setFont(&FreeMonoBold12pt7b);
-    display.setCursor(13, 88);
+    display.setCursor(13, 80);
     display.print(String(w[0].minTemperature));
     display.print(" - ");
     display.print(String(w[0].maxTemperature));
