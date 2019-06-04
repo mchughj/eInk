@@ -186,16 +186,22 @@ bool getWeatherData()
   icon = getIcon(condition, icon_code, false, false);
   /* Display weather conditions */
   display.fillScreen(GxEPD_WHITE);
-  display.drawBitmap(icon, -5, -5, 80, 80, GxEPD_WHITE);
+  display.drawBitmap(icon, -5, -15, 80, 80, GxEPD_WHITE);
   display.setTextColor(GxEPD_BLACK);
   display.setFont(&FreeMonoBold9pt7b);
 
-  display.setCursor(180, 11);
+  // Right justify the two top lines containing the 
+  // date and time information.
+  if( day() < 10 ) { 
+    display.setCursor(193, 11);
+  } else { 
+    display.setCursor(182, 11);
+  }
   display.print(dayShortStr(weekday()));
   display.print(" ");
   display.print(monthShortStr(month()));
   display.print(" ");
-  prettyPrintTwoCharacterInt(' ', day());
+  display.print(day());
   
   int h = hour();
   display.setCursor(237, 31);
@@ -207,7 +213,7 @@ bool getWeatherData()
     // Show the wind information.  If we aren't showing wind then we can show 
     // the expected day range.  This happens as part of the forecast.
     display.drawBitmap(strong_wind_small, 0, 62, 48, 48, GxEPD_WHITE);
-    display.setCursor(50, 89);
+    display.setCursor(50, 79);
     if (IS_METRIC_UNITS) {
       display.print(String((int)(wind * 3.6)) + "km/h");
     } else {
@@ -216,7 +222,6 @@ bool getWeatherData()
   }
 
   if (SHOW_SUNDATA_INSTEAD_OF_HUMIDITY == false) { 
-    // We don't care about the sun data so we have space to display the humidity information   
     display.drawBitmap(humidity_small, 0, 97, 32, 32, GxEPD_WHITE);
     display.setCursor(50, 119);
     display.print(String(humidity) + "%");
@@ -232,15 +237,17 @@ bool getWeatherData()
     // be modified by the time_zone * 60 offset.
     display.setTextColor(GxEPD_BLACK);
     display.setFont(&FreeMonoBold9pt7b);
-    display.setCursor(4, 110);
+    display.setCursor(4, 99);
 
+    display.print( "Rise:" );
     display.print(hour(sunrise));
     display.print( ":" );
     prettyPrintTwoCharacterInt('0', minute(sunrise));
 
-    display.print( "->" );
+    display.setCursor(4, 117);
 
-    prettyPrintTwoCharacterInt('0', hour(sunset));
+    display.print( "Set:" );
+    display.print(hour(sunset));
     display.print( ":" );
     prettyPrintTwoCharacterInt('0', minute(sunset));
 
@@ -248,7 +255,7 @@ bool getWeatherData()
   }
   
   // Current Temp
-  display.setCursor(72, 45);
+  display.setCursor(72, 35);
   display.setFont(&FreeMonoBold18pt7b);
   if (IS_METRIC_UNITS) {
     display.println(String((int)current_temp) + "C");
@@ -492,10 +499,11 @@ bool getForecastData()
   // current date will contain less data points.
   if (!SHOW_WIND_INSTEAD_OF_DAY_RANGE) { 
     display.setTextColor(GxEPD_BLACK);
-    display.setFont(&FreeMonoBold12pt7b);
-    display.setCursor(13, 80);
+    display.setFont(&FreeMonoBold9pt7b);
+    display.setCursor(4, 75);
+    display.print("L:");
     display.print(String(w[0].minTemperature));
-    display.print(" - ");
+    display.print(" H:");
     display.print(String(w[0].maxTemperature));
   }
 
