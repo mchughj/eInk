@@ -51,6 +51,90 @@ struct WeatherSummary {
   int countDataPoints;
 };
 
+// We track the current day temperature range because information for a day
+// changes as the day goes on.  If we didn't do this then we would lose the
+// early hours in the day (and some of the temperature ranges) later in the
+// day.
+//
+// This information is stored within RTC memory as nothing else is available
+// across deep sleeps.
+WeatherSummary currentDay;
+
+String prettyPrintWeatherSummary( const WeatherSummary &w ) { 
+  String result = "WeatherSummary - minTemp: ";
+
+  return result + w.minTemperature + ", maxTemp: " + w.maxTemperature +
+    ", minConditionCode: " + w.minConditionCode +
+    ", maxConditionCode: " + w.maxConditionCode +
+    ", minTime: " + w.minTime +
+    ", maxTime: " + w.maxTime +
+    ", countDataPoints: " + w.countDataPoints;
+}
+
+void readCurrentInfoFromRTC() { 
+  if (ESP.rtcUserMemoryRead(0, (uint32_t*) &currentDay, sizeof(currentDay))) {
+    Serial.print("Read current day information; ");
+    Serial.println( prettyPrintWeatherSummary(currentDay) );
+  } else {
+    Serial.println("Failure in reading current day information;");
+  }
+}
+
+void writeCurrentInfoToRTC() { 
+  Serial.print("About to write current day information; ");
+  Serial.println( prettyPrintWeatherSummary(currentDay) );
+ 
+  if (ESP.rtcUserMemoryWrite(0, (uint32_t*) &currentDay, sizeof(currentDay))) {
+    Serial.println("Write completed successfully");
+  } else {
+    Serial.println("Failure in writing current day information");
+  }
+}
+
+int getDayForWeatherSummary( const WeatherSummary & w ) {
+  return day(w.minTime);
+}
+
+void maybeReplaceCurrentWeatherInfo( const WeatherSummary & latestForecast ) { 
+  uint8_t d1 = getDayForWeatherSummary(currentDay);
+  uint8_t d2 = getDayForWeatherSummary(latestForecast);
+
+  if (d1 != d2) { 
+    Serial.print("Compared two dates and found a difference; d1 (currentDay): ");
+    Serial.print(d1);
+    Serial.print(", d2 (latestForecast): ");
+    Serial.println(d2);
+    // It is a new day so the latestForecast will replace the currentDay
+    memcpy( (void*) &currentDay, (void*) &latestForecast, sizeof(currentDay));
+
+    Serial.print("New day in latestForecast replaces old day; newData: ");
+    Serial.println(prettyPrintWeatherSummary(currentDay));
+  } else {
+    Serial.println("Current day information is the same day as the latest forecast.  Using current day and not new forecast data.");
+  }
+}
+
+void adjustCurrentWeatherInfo( const int currentTemperature ) {
+  // The forecast contains expected values for the day range.  These ranges
+  // could be wrong with respect to the current observed temperatures for a few
+  // different reasons - the most likely because forecasts could be inaccurate. 
+  if (currentTemperature > currentDay.maxTemperature) { 
+    Serial.print("Current temperature is greater than currentDay; currentTemperature: ");
+    Serial.print(currentTemperature);
+    Serial.print(", currentDay.maxTemperature: ");
+    Serial.println(currentDay.maxTemperature);
+    currentDay.maxTemperature = currentTemperature;
+  }
+  if (currentTemperature < currentDay.minTemperature) { 
+    Serial.print("Current temperature is less than currentDay; currentTemperature: ");
+    Serial.print(currentTemperature);
+    Serial.print(", currentDay.minTemperature: ");
+    Serial.println(currentDay.minTemperature);
+    currentDay.minTemperature = currentTemperature;
+  }
+}
+
+
 void setup()
 {
   display.init();
@@ -64,12 +148,18 @@ void setup()
   wifiManager.autoConnect("Badgy AP");
 
   Serial.begin(115200);
+
+  // Read the current weather information from the registers that survive the deep sleep so that we can
+  // preserve the expected range of temperatures for the current day. 
+  readCurrentInfoFromRTC();
+
   if (getWeatherData() && getForecastData()) {
-    // Success in getting and showing all necessary data. 
-    Serial.println("Sleeping for an hour");
+    writeCurrentInfoToRTC();
+    Serial.println("Success in getting current and forecast.  Sleeping.");
     ESP.deepSleep(3600e6, WAKE_RF_DEFAULT);
   } else {
-    Serial.println("Sleeping before retry");
+    Serial.println("Failure in getting either the current or forecast.  Sleeping for a tiny bit.");
+    writeCurrentInfoToRTC();
     ESP.deepSleep(50e6, WAKE_RF_DEFAULT);
   }
 }
@@ -263,6 +353,8 @@ bool getWeatherData()
     display.println(String((int)current_temp) + "F");
   }
 
+  adjustCurrentWeatherInfo(current_temp);
+
   display.update();
   return true;
 }
@@ -283,6 +375,7 @@ String getUnitsString() {
     return "imperial";
   }
 }
+
 
 bool extractWeatherSummary(JsonObject& root, WeatherSummary *w, int count) {
   int dayIndex = 0;
@@ -333,20 +426,8 @@ bool extractWeatherSummary(JsonObject& root, WeatherSummary *w, int count) {
         // Give a dump of what was discovered.
         Serial.print( "Day complete; dayIndex: ");
         Serial.print( dayIndex );
-        Serial.print( ", minTemp: ");
-        Serial.print( w[dayIndex].minTemperature );
-        Serial.print( ", maxTemp: ");
-        Serial.print( w[dayIndex].maxTemperature);
-        Serial.print( ", minConditionCode: ");
-        Serial.print( w[dayIndex].minConditionCode);
-        Serial.print( ", maxConditionCode: ");
-        Serial.print( w[dayIndex].maxConditionCode);
-        Serial.print( ", minTime: ");
-        Serial.print( w[dayIndex].minTime);
-        Serial.print( ", maxTime: ");
-        Serial.print( w[dayIndex].maxTime);
-        Serial.print( ", countDataPoints: ");
-        Serial.println( w[dayIndex].countDataPoints);
+        Serial.print( ", ");
+        Serial.println(prettyPrintWeatherSummary(w[dayIndex]));
 
         dayIndex += 1;
       }
@@ -358,25 +439,14 @@ bool extractWeatherSummary(JsonObject& root, WeatherSummary *w, int count) {
       break;
     }
 
-    Serial.print( "Current weather summary for day; dataIndex: ");
-    Serial.print( dataIndex );
-    Serial.print( ", dayIndex: ");
-    Serial.print( dayIndex );
-    Serial.print( ", minTemp: ");
-    Serial.print( w[dayIndex].minTemperature );
-    Serial.print( ", maxTemp: ");
-    Serial.print( w[dayIndex].maxTemperature);
-    Serial.print( ", minConditionCode: ");
-    Serial.print( w[dayIndex].minConditionCode);
-    Serial.print( ", maxConditionCode: ");
-    Serial.print( w[dayIndex].maxConditionCode);
-    Serial.print( ", minTime: ");
-    Serial.print( w[dayIndex].minTime);
-    Serial.print( ", maxTime: ");
-    Serial.print( w[dayIndex].maxTime);
-    Serial.print( ", countDataPoints: ");
-    Serial.println( w[dayIndex].countDataPoints);
-
+    if (0) { 
+      Serial.print( "Current weather summary for day; dataIndex: ");
+      Serial.print( dataIndex );
+      Serial.print( ", dayIndex: ");
+      Serial.print( dayIndex );
+      Serial.print( ", " );
+      Serial.println(prettyPrintWeatherSummary(w[dayIndex]));
+    }
 
     w[dayIndex].minTemperature = min( w[dayIndex].minTemperature, temp );
     w[dayIndex].maxTemperature = max( w[dayIndex].maxTemperature, temp ); 
@@ -386,24 +456,21 @@ bool extractWeatherSummary(JsonObject& root, WeatherSummary *w, int count) {
     w[dayIndex].maxTime = max( w[dayIndex].minTime, t );
     w[dayIndex].countDataPoints += 1;
 
-    Serial.print( "New weather summary for day; dayIndex: ");
-    Serial.print( dayIndex );
-    Serial.print( ", minTemp: ");
-    Serial.print( w[dayIndex].minTemperature );
-    Serial.print( ", maxTemp: ");
-    Serial.print( w[dayIndex].maxTemperature);
-    Serial.print( ", minConditionCode: ");
-    Serial.print( w[dayIndex].minConditionCode);
-    Serial.print( ", maxConditionCode: ");
-    Serial.print( w[dayIndex].maxConditionCode);
-    Serial.print( ", minTime: ");
-    Serial.print( w[dayIndex].minTime);
-    Serial.print( ", maxTime: ");
-    Serial.print( w[dayIndex].maxTime);
-    Serial.print( ", countDataPoints: ");
-    Serial.println( w[dayIndex].countDataPoints);
+    if (0) { 
+      Serial.print( "New weather summary for day; dayIndex: ");
+      Serial.print( dayIndex );
+      Serial.print( ", " );
+      Serial.println(prettyPrintWeatherSummary(w[dayIndex]));
+    }
 
     dataIndex = dataIndex + 1;
+  }
+
+  for (int i=0; i < count; i++) { 
+    Serial.print( "Weather summary for day; dayIndex: ");
+    Serial.print( i );
+    Serial.print( ", " );
+    Serial.println(prettyPrintWeatherSummary(w[i]));
   }
 
   return true;
@@ -494,17 +561,20 @@ bool getForecastData()
   }
 
   // If we want summary temperature for the rest of the day then that goes here
-  // as well since it is pulled from the 0th offset of the summary data.  Note that 
-  // this daily summary will become less 'summary' as time goes on since the 
-  // current date will contain less data points.
+  // as well since it is pulled, in part, from the summary data for the day.
   if (!SHOW_WIND_INSTEAD_OF_DAY_RANGE) { 
+
+    // We use the 'currentDay' information but allow it to be influenced by the
+    // forecast data if the currentDay is no longer the most recent day.
+    maybeReplaceCurrentWeatherInfo(w[0]);
+    
     display.setTextColor(GxEPD_BLACK);
     display.setFont(&FreeMonoBold9pt7b);
     display.setCursor(4, 75);
     display.print("L:");
-    display.print(String(w[0].minTemperature));
+    display.print(String(currentDay.minTemperature));
     display.print(" H:");
-    display.print(String(w[0].maxTemperature));
+    display.print(String(currentDay.maxTemperature));
   }
 
   display.update();
