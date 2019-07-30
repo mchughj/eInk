@@ -1,3 +1,8 @@
+
+// Build and flash reminders:
+//   1/  When compiling the board type must be NodeMCU 1.0 (ESP-12E Module).
+//   2/  Hit upload and then just before completion turn off the unit and back on again.
+
 /* e-paper display lib */
 #include <GxEPD.h>
 #include <GxGDEH029A1/GxGDEH029A1.h>
@@ -160,7 +165,7 @@ void setup()
   } else {
     Serial.println("Failure in getting either the current or forecast.  Sleeping for a tiny bit.");
     writeCurrentInfoToRTC();
-    ESP.deepSleep(50e6, WAKE_RF_DEFAULT);
+    ESP.deepSleep(60e6, WAKE_RF_DEFAULT);
   }
 }
 
@@ -293,11 +298,18 @@ bool getWeatherData()
   display.print(" ");
   display.print(day());
   
-  int h = hour();
+  // We display some indication of the hour but not the exact time since
+  // this is confusing and suggests that the current time is shown.
+  // Instead we want to indicate the general hour where this information
+  // was drawn.
+  int h = hourFormat12();
   display.setCursor(237, 31);
-  prettyPrintTwoCharacterInt(' ', hour());
-  display.print(":");
-  prettyPrintTwoCharacterInt('0', minute());
+  prettyPrintTwoCharacterInt(' ', h);
+  if (isAM()) { 
+    display.print(" AM");
+  } else { 
+    display.print(" PM");
+  }
 
   if (SHOW_WIND_INSTEAD_OF_DAY_RANGE) { 
     // Show the wind information.  If we aren't showing wind then we can show 
