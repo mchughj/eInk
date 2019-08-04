@@ -41,11 +41,56 @@ const boolean IS_METRIC_UNITS = false;
 const boolean SHOW_SUNDATA_INSTEAD_OF_HUMIDITY = true;
 const boolean SHOW_WIND_INSTEAD_OF_DAY_RANGE = false;
 
-/* Configure pins for display */
+// This program will fetch weather information with a periodicity that is determined by
+// the current hour.  During 'off' hours we spend more time sleeping and less time 
+// gathering weather information that no one will see.  During peak hours we can can
+// fetch more aggressively.  This array contains the amount of time to sleep, indexed 
+// by the hour of the day.
+#define MINUTES_IN_ONE_HOUR 60
+#define MINUTES_IN_TWO_HOURS 120
+#define MINUTES_IN_THREE_HOURS 180
+#define MINUTES_IN_FOUR_HOURS 240
+#define MINUTES_IN_FIVE_HOURS 300
+#define MINUTES_IN_SIX_HOURS 360
+const long unsigned int minutesToSleepForHour[24] = {
+  MINUTES_IN_FOUR_HOURS,    // midnight hour
+  MINUTES_IN_THREE_HOURS,   // 1am 
+  MINUTES_IN_TWO_HOURS,     // 2am 
+  MINUTES_IN_ONE_HOUR,      // 3am 
+  MINUTES_IN_ONE_HOUR,      // 4am 
+  MINUTES_IN_ONE_HOUR,      // 5am 
+  MINUTES_IN_ONE_HOUR,      // 6am 
+  MINUTES_IN_ONE_HOUR,      // 7am 
+  MINUTES_IN_ONE_HOUR,      // 8am 
+  MINUTES_IN_ONE_HOUR,      // 9am 
+  MINUTES_IN_ONE_HOUR,      // 10am 
+  MINUTES_IN_ONE_HOUR,      // 11am 
+  MINUTES_IN_ONE_HOUR,      // 12pm 
+  MINUTES_IN_ONE_HOUR,      // 1pm 
+  MINUTES_IN_ONE_HOUR,      // 2pm 
+  MINUTES_IN_ONE_HOUR,      // 3pm 
+  MINUTES_IN_ONE_HOUR,      // 4pm 
+  MINUTES_IN_ONE_HOUR,      // 5pm 
+  MINUTES_IN_ONE_HOUR,      // 6pm 
+  MINUTES_IN_ONE_HOUR,      // 7pm 
+  MINUTES_IN_ONE_HOUR,      // 8pm 
+  MINUTES_IN_SIX_HOURS,     // 9pm 
+  MINUTES_IN_SIX_HOURS,     // 10pm 
+  MINUTES_IN_SIX_HOURS,     // 11pm 
+};
+  
+// Configure the display
 GxIO_Class io(SPI, SS, 0, 2);
 GxEPD_Class display(io); // default selection of D4, D2
 
-// Summary weather information for a period of time captured by the parts within the structure.
+// WeatherSummary is a data structure used to store overall summary information
+// about the weather that has been gathered.  The time period captured by the
+// summary is contained within minTime and maxTime.  It could be a single hour
+// or as long as a day.  The other constituent parts contain the min and max
+// values that we have gathered for that time range.  The number of data points
+// that contributes to the various min and max values is stored in
+// countDataPoints.
+//
 struct WeatherSummary {
   int minTemperature;
   int maxTemperature;
@@ -159,9 +204,21 @@ void setup()
   readCurrentInfoFromRTC();
 
   if (getWeatherData() && getForecastData()) {
+    int h = hour();
+    long unsigned int microsecondSleepTime;
+
+    // The hour is supposed to be between 0 and 23 but handling any oddball failures here.
+    if (h<0 || h>23) { 
+      microsecondSleepTime = 3600e6;
+    } else {
+      microsecondSleepTime = minutesToSleepForHour[h] * 60 * 100000;
+    }
     writeCurrentInfoToRTC();
-    Serial.println("Success in getting current and forecast.  Sleeping.");
-    ESP.deepSleep(3600e6, WAKE_RF_DEFAULT);
+    Serial.print("Success in getting current and forecast.  Going to sleep;  hour: ");
+    Serial.print(h);
+    Serial.print(", microsecondSleepTime: ");
+    Serial.println(microsecondSleepTime);
+    ESP.deepSleep(microsecondSleepTime, WAKE_RF_DEFAULT);
   } else {
     Serial.println("Failure in getting either the current or forecast.  Sleeping for a tiny bit.");
     writeCurrentInfoToRTC();
