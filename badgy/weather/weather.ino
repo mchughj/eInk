@@ -42,41 +42,42 @@ const boolean SHOW_SUNDATA_INSTEAD_OF_HUMIDITY = true;
 const boolean SHOW_WIND_INSTEAD_OF_DAY_RANGE = false;
 
 // This program will fetch weather information with a periodicity that is determined by
-// the current hour.  During 'off' hours we spend more time sleeping and less time 
-// gathering weather information that no one will see.  During peak hours we can can
-// fetch more aggressively.  This array contains the amount of time to sleep, indexed 
-// by the hour of the day.
-#define MINUTES_IN_ONE_HOUR 60
-#define MINUTES_IN_TWO_HOURS 120
-#define MINUTES_IN_THREE_HOURS 180
-#define MINUTES_IN_FOUR_HOURS 240
-#define MINUTES_IN_FIVE_HOURS 300
-#define MINUTES_IN_SIX_HOURS 360
-const long unsigned int minutesToSleepForHour[24] = {
-  MINUTES_IN_FOUR_HOURS,    // midnight hour
-  MINUTES_IN_THREE_HOURS,   // 1am 
-  MINUTES_IN_TWO_HOURS,     // 2am 
-  MINUTES_IN_ONE_HOUR,      // 3am 
-  MINUTES_IN_ONE_HOUR,      // 4am 
-  MINUTES_IN_ONE_HOUR,      // 5am 
-  MINUTES_IN_ONE_HOUR,      // 6am 
-  MINUTES_IN_ONE_HOUR,      // 7am 
-  MINUTES_IN_ONE_HOUR,      // 8am 
-  MINUTES_IN_ONE_HOUR,      // 9am 
-  MINUTES_IN_ONE_HOUR,      // 10am 
-  MINUTES_IN_ONE_HOUR,      // 11am 
-  MINUTES_IN_ONE_HOUR,      // 12pm 
-  MINUTES_IN_ONE_HOUR,      // 1pm 
-  MINUTES_IN_ONE_HOUR,      // 2pm 
-  MINUTES_IN_ONE_HOUR,      // 3pm 
-  MINUTES_IN_ONE_HOUR,      // 4pm 
-  MINUTES_IN_ONE_HOUR,      // 5pm 
-  MINUTES_IN_ONE_HOUR,      // 6pm 
-  MINUTES_IN_ONE_HOUR,      // 7pm 
-  MINUTES_IN_ONE_HOUR,      // 8pm 
-  MINUTES_IN_SIX_HOURS,     // 9pm 
-  MINUTES_IN_SIX_HOURS,     // 10pm 
-  MINUTES_IN_SIX_HOURS,     // 11pm 
+// the following array structure.  Unfortunately the ESP deepSleep takes in microseconds and 
+// uses an unsigned long which means that the longest you can sleep for would
+// be 4,294,967,295 microseconds, which is about ~71 minutes.  This means that
+// I can't just sleep for 4 hours in the middle of the night.  
+//
+// Instead, I sleep for an hour each time and then wake up and do as little
+// work as possible to determine whether or not the below array indicates that
+// I should do anything in the current hour.  If the answer is 'no' then
+// immediately go to sleep.
+#define SLEEP_THIS_HOUR false
+#define WORK_THIS_HOUR true 
+const bool shouldDoWorkThisHour[24] = {
+  SLEEP_THIS_HOUR,   // midnight hour
+  SLEEP_THIS_HOUR,   // 1am 
+  SLEEP_THIS_HOUR,   // 2am 
+  SLEEP_THIS_HOUR,   // 3am 
+  SLEEP_THIS_HOUR,   // 4am 
+  WORK_THIS_HOUR,    // 5am 
+  WORK_THIS_HOUR,    // 6am 
+  SLEEP_THIS_HOUR,   // 7am 
+  SLEEP_THIS_HOUR,   // 8am 
+  SLEEP_THIS_HOUR,   // 9am 
+  WORK_THIS_HOUR,    // 10am 
+  SLEEP_THIS_HOUR,   // 11am 
+  WORK_THIS_HOUR,    // 12pm 
+  SLEEP_THIS_HOUR,   // 1pm 
+  WORK_THIS_HOUR,    // 2pm 
+  SLEEP_THIS_HOUR,   // 3pm 
+  SLEEP_THIS_HOUR,   // 4pm 
+  WORK_THIS_HOUR,    // 5pm 
+  SLEEP_THIS_HOUR,   // 6pm 
+  SLEEP_THIS_HOUR,   // 7pm 
+  WORK_THIS_HOUR,    // 8pm 
+  SLEEP_THIS_HOUR,   // 9pm 
+  SLEEP_THIS_HOUR,   // 10pm 
+  SLEEP_THIS_HOUR,   // 11pm 
 };
   
 // Configure the display
@@ -187,6 +188,9 @@ void adjustCurrentWeatherInfo( const int currentTemperature ) {
 
 void setup()
 {
+  Serial.begin(115200);
+  Serial.println();
+
   display.init();
 
   // Set the display in landscape mode
@@ -197,28 +201,19 @@ void setup()
   wifiManager.setAPCallback(configModeCallback);
   wifiManager.autoConnect("Badgy AP");
 
-  Serial.begin(115200);
-
   // Read the current weather information from the registers that survive the deep sleep so that we can
   // preserve the expected range of temperatures for the current day. 
   readCurrentInfoFromRTC();
 
-  if (getWeatherData() && getForecastData()) {
-    int h = hour();
-    long unsigned int microsecondSleepTime;
+  // Note that getWeatherData can decide that nothing should be done further and will
+  // automatically sleep and therefore this function call will never return as the ESP
+  // sleeps and then resets later.
+  bool success = getWeatherData() && getForecastData();
 
-    // The hour is supposed to be between 0 and 23 but handling any oddball failures here.
-    if (h<0 || h>23) { 
-      microsecondSleepTime = 3600e6;
-    } else {
-      microsecondSleepTime = minutesToSleepForHour[h] * 60 * 100000;
-    }
+  if (success) { 
     writeCurrentInfoToRTC();
-    Serial.print("Success in getting current and forecast.  Going to sleep;  hour: ");
-    Serial.print(h);
-    Serial.print(", microsecondSleepTime: ");
-    Serial.println(microsecondSleepTime);
-    ESP.deepSleep(microsecondSleepTime, WAKE_RF_DEFAULT);
+    Serial.print("Success in getting current and forecast.  Going to sleep;");
+    ESP.deepSleep(3600e6, WAKE_RF_DEFAULT);
   } else {
     Serial.println("Failure in getting either the current or forecast.  Sleeping for a tiny bit.");
     writeCurrentInfoToRTC();
@@ -333,6 +328,19 @@ bool getWeatherData()
   server_time = server_time + (time_zone * 60 * 60); 
   setTime(server_time);
 
+  // Look to see if any work should be done.
+  int h = hour();
+  if (h>=0 && h<=23) { 
+    if (!shouldDoWorkThisHour[h]) { 
+      Serial.print("Not doing any work; hour: ");
+      Serial.println(h);
+      ESP.deepSleep(3600e6, WAKE_RF_DEFAULT);
+    } else {
+      Serial.print("Going to do full work this hour; hour: ");
+      Serial.println(h);
+    }
+  }
+
   /* Get icon for weather condition */
   const unsigned char *icon;
   icon = getIcon(condition, icon_code, false, false);
@@ -359,7 +367,7 @@ bool getWeatherData()
   // this is confusing and suggests that the current time is shown.
   // Instead we want to indicate the general hour where this information
   // was drawn.
-  int h = hourFormat12();
+  h = hourFormat12();
   display.setCursor(237, 31);
   prettyPrintTwoCharacterInt(' ', h);
   if (isAM()) { 
